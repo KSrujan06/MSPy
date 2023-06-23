@@ -1,0 +1,946 @@
+The Jenkinsfile is too large and complicated. I would consider revamping. Reduce the number of stages to 3-4 (check, build, test, etc.) 
+and move the functions/scripts out of the Jernkinsfile into a /tools directory. 
+These are called from the Jenkinsfile. Also, break the pipeline into 3 jobs, check job, build, job, and test job.
+
+Additionally, it would be good if the independent "check" job with all the check scripts can also be run locally,
+ without triggering the pipeline, so devs can run it before they even commit.
+ 
+Another piece, it would be nice to add flags to the jenkinsfile for more control. IE devs or anyone can pass specific 
+parameters for more control over what is checked, built, tested in the respective jobs
+
+
+
+
+//Pipeline dependencies
+//1. Jenkins SonarQube Plugin (2.11)
+//2. HttpRequest Plugin (1.8.24)
+//3. Gradle 4.8.1
+
+def build_module_map = [:]
+def modified_files = []
+def pr_analysis_commands_generated
+def compile_enabled_users = ['ENABLED_FOR_ALL']
+def test_run_enabled_users = ['ENABLED_FOR_ALL']
+def buildCmd = ""
+def pr_user_name
+def compileJsp = " compileJsp"
+def compileTestJava = " compileTestJava"
+def enable_pr_change_detection = false
+def enable_compile = false
+def enable_test_run = false
+def github_access_token_Id = 'jsprbld_gen_github_token'
+//def github_api_url = 'https://wwwin-github.cisco.com/api/v3/repos/jasper-sw/iot_controlcenter'
+def github_api_url = 'https://github-hyc.scm.engit.cisco.com/api/v3/repos/jasper-sw/iot_controlcenter'
+
+
+pipeline {
+    agent {
+        label 'docker-nodes-cc-pr-build-pool-4.8.4'
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time:25, activity: true, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '3'))
+    }
+
+    tools {
+        gradle 'Gradle 6.9'
+    }
+
+    environment {
+        CATALINA_HOME = "/usr/local/apache-tomcat-9.0.52"
+        SENCHA_CMD = "/usr/local/senchaCmd/Sencha/Cmd/4.0.4.84"
+        JAVA_HOME = "/usr/java/java8"
+        //Removing Proxy pipeline is being moved to Unified Jenkins- CC-108058
+	// GRADLE_OPTS = "-Dhttp.proxyPort=80 -Dhttp.proxyHost=proxy-wsa.esl.cisco.com -Dhttps.proxyPort=80 -Dhttps.proxyHost=proxy-wsa.esl.cisco.com"
+    }
+
+    stages {
+        stage('SQL File Checks') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    changeRequest()
+                }
+            }
+            steps {
+                checkPRChangelogForSql()
+            }
+        }
+
+        stage('Binary File Checks') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    changeRequest()
+                }
+            }
+            steps {
+                blockBinaryFiles()
+            }
+        }
+
+        stage('Password in Property files') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    changeRequest()
+                }
+            }
+            steps {
+                blockPropertyFilesWithPasswords()
+            }
+        }
+
+        stage('Valid JIRA ID Checks') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    changeRequest()
+                }
+            }
+            steps {
+                validateJIRAFormatInPRTitle()
+            }
+        }
+
+        //Does all our merge commit builds
+        stage('Merge Commit Builds') {
+            when {
+                anyOf {
+                    branch 'master';
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'artifactory_api_credentials', passwordVariable: 'artifactory_password', usernameVariable: 'artifactory_username')]) {
+                        def parallel_compile_command = getParallelCompileCommand("${compileTestJava}${compileJsp}")
+                        sh "${parallel_compile_command}"
+                    }
+                }
+            }
+        }
+
+        stage('Release Upload') {
+            when {
+                anyOf {
+                    branch 'release'
+                }
+            }
+            steps {
+                script {
+                    def removed = readProperties file: 'modules.properties'
+                    def changedModules = getAllFiles(removed['allModules'])
+                    printMapContent(changedModules.get('javaModules'), "Upload Modules")
+                    def generated_upload_command = generateCommandsForUploadArchives(changedModules)
+                    sh "${generated_upload_command}"
+                }
+            }
+        }
+
+        //Temp stage, will be removed after full rollout
+        stage('PR Author Detection') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    changeRequest()
+                }
+            }
+            steps {
+                script {
+                    echo "------------Check Environment---------"
+                    echo "Tomcat9 Path : ${env.CATALINA_HOME}"
+                    echo "PR Number: ${env.CHANGE_ID}"
+                    echo "Feature Branch: ${env.CHANGE_BRANCH}"
+                    echo "Workspace: ${env.WORKSPACE}"
+                    echo "------------Check Environment---------"
+                    def prApiUrl = "${github_api_url}/pulls/${env.CHANGE_ID}"
+                    def response = executeHttpGet(prApiUrl, github_access_token_Id)
+                    if(response != null){
+                        echo "Identifying user"
+                        pr_details = readJSON text: response.getContent()
+                        response.close()
+                        pr_user_name = "${pr_details.user.login}@cisco.com"
+                        if (isUserInList(pr_user_name, compile_enabled_users, 'PR Author Detection')) {
+                            enable_pr_change_detection = true
+                        }
+                        echo "PR Author: ${pr_user_name}"
+                    }
+                }
+            }
+        }
+
+        stage('PR Change Detection') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    expression { enable_pr_change_detection }
+                }
+            }
+            steps {
+                script {
+                    echo "Identifying Changes in PR: ${env.CHANGE_ID}"
+                    def prFilesApiUrl = "${github_api_url}/pulls/${env.CHANGE_ID}/files"
+                    def response = executeHttpGet(prFilesApiUrl, github_access_token_Id)
+                    def headers = response.getHeaders()
+                    if(headers.keySet().contains('Link')){
+                        def linkHeader = headers.get('Link')
+                        echo "Found Link Header, Link = ${linkHeader}"
+                        def last_page_number = extractLastPageNumber(headers)
+                        modified_files = readJSON text: response.getContent()
+                        response.close()
+                        for(current_page = 2; current_page <= (last_page_number as Integer); current_page++){
+                            def page_response = executeHttpGet(prFilesApiUrl + "?page=${current_page}", github_access_token_Id)
+                            if(page_response != null){
+                                def modified_files_per_page = readJSON text: page_response.getContent()
+                                page_response.close()
+                                addToModifiedFiles(modified_files, modified_files_per_page)
+                            }
+                        }
+                    } else {
+                        echo "Link Header Not Found. Pagination not required"
+                        modified_files = readJSON text: response.getContent()
+                        response.close()
+                    }
+                    printChangedFiles(modified_files)
+                    if (sourceFiles(modified_files)) {
+                        enable_compile = true;
+                        if(compileJAVA(modified_files)) {
+                            buildCmd = "${buildCmd}${compileTestJava}"
+                        }
+
+                        if(compileJSP(modified_files)){
+                            buildCmd = "${buildCmd}${compileJsp}"
+                        }
+
+                        if (isUserInList(pr_user_name, test_run_enabled_users, 'Test Runs')) {
+                            enable_test_run = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        //if this is non java/jsp changelist, ignore all gates
+        stage('Skip Checks') {
+            when {
+                allOf {
+                    expression {validStage()}
+                    changeRequest()
+                    expression { !enable_compile }
+                }
+            }
+            environment {
+                scannerHome = tool 'docker-sonar'
+                JAVA_HOME = '/usr/lib/jvm/java-8-openjdk-amd64'
+            }
+            steps {
+                withSonarQubeEnv('IOT-SonarQube') {
+                    script {
+                        echo "Executing sonar analysis, only for modified java files"
+                        pr_analysis_commands_generated = generateCommandsForSonarAnalysis(modified_files, "${env.CHANGE_ID}", "${env.CHANGE_BRANCH}", "${WORKSPACE}")
+                        sh "${pr_analysis_commands_generated}"
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gates') {
+            when {
+                allOf {
+                    expression { validStage() }
+                    expression { enable_compile }
+                    changeRequest()
+                }
+            }
+            failFast true
+            parallel {
+                stage('Compile') {
+                    stages {
+                        stage('Java / JSP') {
+                            steps {
+                                script {
+                                    withCredentials([usernamePassword(credentialsId: 'artifactory_api_credentials', passwordVariable: 'artifactory_password', usernameVariable: 'artifactory_username')]) {
+
+                                        echo "Executing task compile Java and JSP"
+                                        def parallel_compile_command = getParallelCompileCommand(buildCmd)
+                                        sh "${parallel_compile_command}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+                stage('Unit Tests and Sonar Analysis') {
+                    when {
+                        allOf {
+                            expression { enable_test_run }
+                        }
+                    }
+                    agent {
+                        label 'docker-nodes-cc-pr-build-pool-4.8.4'
+                    }
+                    stages {
+                        stage('Unit Tests') {
+                            steps {
+                                script {
+                                    withCredentials([usernamePassword(credentialsId: 'artifactory_api_credentials', passwordVariable: 'artifactory_password', usernameVariable: 'artifactory_username')]) {
+                                        echo "Tomcat9 Path : ${env.CATALINA_HOME}"
+                                        echo "Executing test & JacocoReport, only for modified modules"
+                                        def removed = readProperties file: 'modules.properties'
+                                        def changedModules = getAffectedModules(modified_files, build_module_map,  removed['allModules'])
+                                        printMapContent(changedModules.get('javaModules'), "Affected Java Modules")
+                                        def generated_unit_test_command = generateCommandsForUnitTesting(changedModules)
+                                        sh "${generated_unit_test_command}"
+                                }
+                            }
+                        }
+                    }
+
+                        stage('Sonar Analysis') {
+                            environment {
+                                scannerHome = tool 'docker-sonar'
+                                JAVA_HOME = '/usr/lib/jvm/java-8-openjdk-amd64'
+                            }
+                            steps {
+                                withSonarQubeEnv('IOT-SonarQube') {
+                                    script {
+                                        echo "Executing sonar analysis, only for modified java files"
+                                        pr_analysis_commands_generated = generateCommandsForSonarAnalysis(modified_files, "${env.CHANGE_ID}", "${env.CHANGE_BRANCH}", "${WORKSPACE}")
+                                        sh "${pr_analysis_commands_generated}"
+                                    }
+                                }
+                            }
+                        }
+                        
+                        
+                    stage ('Quality Gate Check') {
+            
+                        	steps {
+                    		script{
+                            echo " Verifying Dev Quality Gates checks!!"
+                            sh 'sleep 300'
+                            try {
+                         
+                            def jsonString = sh(script:"curl -u fc4acf76048f9112766168ffa78890559c23c078: -X GET https://engci-sonar-sjc.cisco.com/sonar/api/qualitygates/project_status?projectKey=iot-junit-develop'&'pullRequest=${env.CHANGE_ID}", returnStdout: true)
+
+                            
+                           
+                           echo 'Response ' + jsonString
+                            def jsonObj = readJSON text: jsonString
+                            def new_reliability_rating = "${jsonObj.projectStatus.conditions[0].actualValue}"
+                            def new_security_rating= "${jsonObj.projectStatus.conditions[1].actualValue}"
+                            def new_coverage = "${jsonObj.projectStatus.conditions[2].actualValue}"
+                            def new_blocker_violations = "${jsonObj.projectStatus.conditions[3].actualValue}"
+                            def new_code_smells = "${jsonObj.projectStatus.conditions[4].actualValue}"
+                            def new_critical_violations = "${jsonObj.projectStatus.conditions[5].actualValue}"
+                            
+                            def sonar_url = "https://engci-sonar-sjc.cisco.com/sonar/dashboard?id=iot-junit-develop&pullRequest=${env.CHANGE_ID}"    
+                            
+
+
+                            echo 'new code coverage ' +  new_coverage
+                            echo 'new_blocker_violations ' +  new_blocker_violations
+                            echo 'new_critical_violations ' +  new_critical_violations
+                            echo 'new_reliability_rating ' + new_reliability_rating
+                            echo 'new_security_rating ' +  new_security_rating
+                            echo 'new_code_smells ' + new_code_smells
+                            //echo 'new_major_violations ' + new_major_violations
+                            echo 'sonar_project ' +  sonar_url 
+                            
+                            def status = "$jsonObj.projectStatus.status"
+                            echo 'Status of QG ' + status    
+                                
+                      
+
+                             def coverageString = "Code Coverage Metrics for this PR : " + "\n" +
+                                                     "New Code Coverage = "+ new_coverage + "\n" +
+                                                     "New Blocker Violations = "+ new_blocker_violations +"\n"+
+                                                     "New Critical Violations = " + new_critical_violations +"\n" +
+                                                     "New Reliability Rating = " + new_reliability_rating  +"\n" +
+                                                     "New Security Rating = " + new_security_rating +"\n" +
+                                                     "New Code Smells = " + new_code_smells +"\n" +
+                                                     "Quality Gate Status = " + status  +"\n" +
+                                                     "SonarQube PR analysis: " + sonar_url
+                                                    // "New Major Violations = " + new_major_violations
+
+                           def comment = pullRequest.comment("$coverageString")
+
+
+                          //Check if QG has passed
+                          assert status == 'OK'
+                 
+                                                      
+                          echo "Quality Gate Check Completed!"
+                         
+                         }
+                       catch (Exception e){
+                          echo '============================Quality Gates Check Exception====================' + e
+                          pullRequest.comment(e)
+                          sh "exit 1"
+                       }
+
+
+
+                        }
+                       }
+                      }
+
+                    }
+                }
+            }
+        }
+
+    }
+
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
+
+@NonCPS
+def printMapContent(map_to_print, message_to_print) {
+    echo "${message_to_print}"
+    for (mapEntry in map_to_print) {
+        echo "${mapEntry.key} : ${mapEntry.value}"
+    }
+    echo "======================================="
+}
+
+@NonCPS
+def printListContent(list_to_print, message_to_print) {
+    echo "${message_to_print}"
+    for (listContent in list_to_print) {
+        echo "${listContent}"
+    }
+    echo "======================================="
+}
+
+@NonCPS
+def executeHttpGet(apiUrl, token){
+    echo "Executing GitHub API Call, ${apiUrl}"
+    def response = httpRequest url: apiUrl, authentication: "${token}"
+    if (response.status != 200) {
+        echo "API call failed, ${apiUrl}"
+        error("Unable to execute API call, StatusCode=${response.status}, Content=${response.content}")
+    } else {
+        echo "API call success, ${apiUrl}"
+        return response
+    }
+}
+
+@NonCPS
+def extractLastPageNumber(headers){
+    def links = headers.get('Link');
+    def last_page = 1
+    for(link in links){
+        if(link.contains('rel=\"last\"')){
+            link = link.split(",")[1]
+            echo "Last page link, ${link}"
+            last_page = link.split(">")[0].split("page=")[1];
+            break
+        }
+    }
+    echo "Last page number, ${last_page}"
+    return last_page
+}
+
+@NonCPS
+def addToModifiedFiles(modified_files, modified_files_per_page){
+    echo "Modified file list contains ${modified_files.size()} files"
+    echo "Adding ${modified_files_per_page.size()} files to modified file list"
+    for(modified_file in modified_files_per_page){
+        modified_files.add(modified_file)
+    }
+}
+
+@NonCPS
+def printChangedFiles(changedFiles) {
+    echo "Total Changed files, ${changedFiles.size()}"
+    for (changedFile in changedFiles) {
+        echo "${changedFile.status} : ${changedFile.filename}"
+    }
+}
+
+
+@NonCPS
+//enable compile only if its part of modules, xml, properties or gradle files. Add/remove files to the pattern as required
+def sourceFiles(changedFiles) {
+    for (changedFile in changedFiles) {
+        def filePath = "${changedFile.filename}"
+        if(filePath =~ /module|xml|properties|gradle/) {
+            return true
+        }
+    }
+    return false
+}
+
+@NonCPS
+def compileJSP(changedFiles) {
+    for (changedFile in changedFiles) {
+        def filePath = "${changedFile.filename}"
+        if(filePath =~ /\.JSP|\.jsp|\.gradle/) {
+            return true
+        }
+    }
+    return false
+}
+
+@NonCPS
+def compileJAVA(changedFiles) {
+    for (changedFile in changedFiles) {
+        def filePath = "${changedFile.filename}"
+        if(!(filePath =~ /\.JSP|\.jsp/)) {
+            return true
+        }
+    }
+    return false
+}
+
+@NonCPS
+def isUserInList(user_name, user_list, stage_details) {
+    echo "Check for stage: ${stage_details}"
+    echo "User to be searched for: {$user_name}"
+    echo "List to be searched in: {$user_list}"
+    if(user_list.get(0) == 'ENABLED_FOR_ALL'){
+        echo "Stage : ${stage_details} is enabled for all users."
+        return true
+    }
+
+    def userFound = false
+    for (user_name_in_list in user_list) {
+        if (user_name == user_name_in_list) {
+            echo "User found in list"
+            userFound = true
+            break
+        }
+    }
+    return userFound
+}
+
+@NonCPS
+def getAffectedModules(changedFiles, buildModules, validModules) {
+    def affectedModules = initAffectedModules()
+    for (changedFile in changedFiles) {
+        def filePath = "${changedFile.filename}"
+        //Java/xml/gradle changes in any module
+        //TODO - Build file changes at root level
+        addToAffectedModules(filePath,affectedModules,validModules)
+    }
+    return affectedModules;
+}
+
+@NonCPS
+def addToAffectedModules(filePath, affectedModules, validModules) {
+    if (filePath.contains("module") && filePath =~ /java|xml|gradle/) {
+        affectedModules['buildRequired'] = true
+        def moduleName = filePath.split("/")[1]
+        if(validModules.contains(moduleName)) {
+            def jarName = getJarName(moduleName)
+            affectedModules['javaModules'].put(moduleName, jarName)
+        }
+    }
+}
+
+@NonCPS
+def initAffectedModules() {
+    def affectedModules = [:]
+    affectedModules['javaModules'] = [:]
+    affectedModules['buildRequired'] = false
+    return affectedModules
+}
+
+@NonCPS
+def getAllFiles(validModules) {
+    def affectedModules = initAffectedModules()
+    def changeLogSets = currentBuild.rawBuild.changeSets
+    for (int i = 0; i < changeLogSets.size(); i++) {
+        def entries = changeLogSets[i].items
+        for (int j = 0; j < entries.length; j++) {
+            def entry = entries[j]
+            //echo "${entry.commitId} by ${entry.author} on ${new Date(entry.timestamp)}: ${entry.msg}"
+            def files = new ArrayList(entry.affectedFiles)
+            for (int k = 0; k < files.size(); k++) {
+                def file = files[k]
+                echo "  ${file.editType.name} ${file.path}"
+                def filePath = "${file.path}"
+                addToAffectedModules(filePath, affectedModules, validModules)
+            }
+        }
+    }
+    return affectedModules;
+}
+
+@NonCPS
+def getJarName(moduleName) {
+    def allCapWords = ["UI", "HLR", "SSO", "JW", "CSP", "AAA", "EE", "HP", "HSS", "CCIP", "CIP"]
+    for (word in allCapWords) {
+        moduleName = moduleName.replace(word, word.toUpperCase().substring(0, 1) + word.toLowerCase().substring(1))
+    }
+
+    def names = moduleName.split("(?=\\p{Upper})");
+
+    def jarName = ''
+    for (name in names) {
+        if (!name.equals('Domain')) {
+            if (!jarName.equals('')) {
+                jarName += '-'
+            }
+            jarName += name.toLowerCase()
+        }
+    }
+    return jarName
+}
+
+@NonCPS
+def generateCommandsForUnitTesting(changedModules) {
+    //TODO optimize multiple scenarios
+    def unitTestCommand = "echo 'No modules changed. Skipping Unit Testing'"
+    if (changedModules.get("buildRequired") && changedModules.get("javaModules").size() > 0) {
+        //Build selected modules - -Dtest.ignoreFailures=true
+        unitTestCommand = "gradle --stacktrace -Dtest.ignoreFailures=true -DtestMaxParallelForks=1 -DtestForkEvery=1 -PstrictTestThresholds=true -Pjava.warnings.hide"
+        def changedJavaModules = changedModules.get('javaModules')
+        def modulesForUnitTest = getModulesInOrderForUnitTesting(changedJavaModules)
+        printListContent(modulesForUnitTest, "Modules ordered for Unit Testing")
+        for (moduleName in modulesForUnitTest) {
+            unitTestCommand = unitTestCommand +
+                    " :${moduleName}:test :${moduleName}:jacocoTestReport "
+        }
+        // Skipping the scala-lib module
+        unitTestCommand = unitTestCommand + " -x :scala-lib:test"
+    }
+    //unitTestCommand = unitTestCommand + " --parallel --max-workers=4"
+    // unitTestCommand = "gradle -Dtest.ignoreFailures=true -DtestMaxParallelForks=1 -DtestForkEvery=1 -PstrictTestThresholds=true test jacocoTestReport -x :scala-lib:test"
+    return unitTestCommand
+}
+
+def generateCommandsForUploadArchives(changedModules) {
+    def uploadArchivesCommand = "echo 'No modules changed. Skipping uploadArchives'"
+    if (changedModules.get("javaModules").size() > 0) {
+        def vversion = getLatestDbFolder()
+        //for now generate for all modules until assets app fixes their dependencies
+        uploadArchivesCommand = "gradle -PreleaseVersion=" + vversion.toString() + " -PisRelease=true build -x test --parallel --max-workers=4 uploadArchives"
+//         echo "Added command :${uploadArchivesCommand}"
+//         def changedJavaModules = changedModules.get('javaModules')
+//         def modulesForUpload = getModulesInOrderForUnitTesting(changedJavaModules)
+//         printListContent(modulesForUpload, "Modules ordered for uploadArchives")
+//         for (moduleName in modulesForUpload) {
+//             uploadArchivesCommand = uploadArchivesCommand + " :${moduleName}:uploadArchives "
+//         }
+    }
+    return uploadArchivesCommand
+}
+
+
+@NonCPS
+def getModulesInOrderForUnitTesting(changedJavaModules) {
+    def modulesForUnitTests = []
+    def priorityModules = ['CorePrime', 'Core', 'FlexibleBillingDomain', 'ProvisionApp', 'ProvisionDomain']
+    for (priorityModule in priorityModules) {
+        if (changedJavaModules.containsKey(priorityModule)) {
+            modulesForUnitTests.add(changedJavaModules.get(priorityModule))
+            changedJavaModules.put(priorityModule, null)
+        }
+    }
+
+    for (moduleEntry in changedJavaModules) {
+        def jarName = moduleEntry.getValue()
+        if (jarName != null){
+            modulesForUnitTests.add(jarName)
+        }
+    }
+    printListContent(modulesForUnitTests, "Modules for unit testing")
+    return modulesForUnitTests;
+}
+
+@NonCPS
+def generateCommandsForSonarAnalysis(changedFiles, prNumber, prBranch, workspace) {
+    def changedModules = [:]
+    def sourceFiles = "Jenkinsfile"
+    //initialize with a dummy file which will not be analyzed. Needed to trigger an analysis when no java files changed
+    def testFiles = ""
+    def jacocoFiles = ""
+    def jUnitReportFiles = ""
+    for (changedFile in changedFiles) {
+        def filePath = "${changedFile.filename}".toString().trim()      //&& "${changedFile.status}" != "deleted"
+        def fileStatus = "${changedFile.status}".toString().trim()
+        if (isSonarSourceFile(filePath, fileStatus)) {
+            def moduleName = filePath.split("/")[1]
+            sourceFiles = sourceFiles + ',' + filePath
+            echo "Added file for sonar analysis :${filePath}"
+            changedModules.put(moduleName, true)
+        }
+    }
+
+    //module/BatchApp/build/jacoco/jacocoXML.xml
+    //module/BatchApp/build/test-results/test
+    //module/BatchApp/src_test
+    for (changedModule in changedModules) {
+        def moduleName = "${changedModule.key}"
+
+        if (jacocoFiles != "") {
+            jacocoFiles = jacocoFiles + ','
+        }
+        jacocoFiles = jacocoFiles + 'module/' + moduleName + '/build/jacoco/jacocoXML.xml'
+
+        if (jUnitReportFiles != "") {
+            jUnitReportFiles = jUnitReportFiles + ','
+        }
+        jUnitReportFiles = jUnitReportFiles + 'module/' + moduleName + '/build/test-results/test'
+
+        // TODO (srsarnob): this causes a failure, so for now we hardcode the check 
+        //if (fileExists('module/' + moduleName + '/src_test')) {
+        if (moduleName != 'PolicyPlanDomain'
+              && moduleName != 'AttAccountServiceEmulator'
+              && moduleName != 'AttCsiEmulator'
+              && moduleName != 'BatchAppScalaDomain'
+              && moduleName != 'CSPProvisioningAdapterDomain'
+              && moduleName != 'CpsSprAdapterApp'
+              && moduleName != 'CugApp'
+              && moduleName != 'FsMigrationApp'
+              && moduleName != 'IPAMAdapterApp'
+              && moduleName != 'JasperSoapEmulator'
+              && moduleName != 'MerchandisingDomain'
+              && moduleName != 'MessagingDomain'
+              && moduleName != 'MetricsFeedDomain'
+              && moduleName != 'NotificationApp'
+              && moduleName != 'PcrfNotificationApp'
+              && moduleName != 'RegistryServerApp'
+              && moduleName != 'RestDomain'
+              && moduleName != 'SmscAdapterApp'
+              && moduleName != 'SplunkIntegrationDomain'
+              && moduleName != 'TefCallback'
+              && moduleName != 'VivoMsisdnEmulator'
+              && moduleName != 'dynamic') {
+            if (testFiles != "") {
+                testFiles = testFiles + ','
+            }
+            testFiles = testFiles + 'module/' + moduleName + '/src_test'
+        }
+    }
+
+    echo "Source Files : ${sourceFiles}"
+    echo "Test Files : ${testFiles}"
+    echo "JUnit Report Files : ${jUnitReportFiles}"
+    echo "Jacoco XML files : ${jacocoFiles}"
+
+    def analysisCommand = "/usr/local/sonar-scanner-3.0.3.778/bin/sonar-scanner " +
+            "-Dsonar.projectKey=iot-junit-develop " +
+            "-Dsonar.pullrequest.key=${prNumber} " +
+            "-Dsonar.pullrequest.branch=${prBranch} " +
+            "-Dsonar.pullrequest.base=develop " +
+            "-Dsonar.userHome=${workspace} " +
+            "-Dsonar.language=java " +
+            "-Dsonar.java.source=1.8 " +
+            "-Dsonar.java.coveragePlugin=jacoco " +
+            "-Dsonar.scm.provider=git " +
+            "-Dsonar.scm.enabled=true " +
+            "-Dsonar.projectBaseDir=${workspace}/ " +
+            "-Dsonar.findbugs.enabled=false " +
+            "-Dsonar.java.binaries=${workspace}/module/ " +
+            "-Dsonar.java.libraries=**/lib/*.jar " +
+            "-Dsonar.java.test.libraries=**/lib/*.jar " +
+            "-Dsonar.coverage.jacoco.xmlReportPaths=${jacocoFiles} " +
+            "-Dsonar.junit.reportPaths=${jUnitReportFiles} " +
+            "-Dsonar.tests=${testFiles} " +
+            "-Dsonar.sources=${sourceFiles} "
+
+    return analysisCommand
+}
+
+@NonCPS
+def isSonarSourceFile(filePath, fileStatus){
+    filePath = filePath.trim()
+    fileStatus = fileStatus.trim()
+    echo "File : ${fileStatus} :${filePath}"
+    return ((fileStatus.equals('added') || fileStatus.equals('modified')) &&
+            filePath.contains('module') && filePath.endsWith('.java') &&
+            filePath.contains('/src/'))
+}
+
+
+@NonCPS
+def getParallelCompileCommand(buildCmd) {
+    //TODO - remove the compileTestJava once CC-80655 is fixed
+    // Excluded scala-lib from CC build
+    return "gradle --stacktrace -Puser=jenkins -Ppw=jenkins --parallel --max-workers=4 " + "${buildCmd} -x :scala-lib:scalac -x :scala-lib:compileJava -x :scala-lib:compileTestJava"
+}
+
+@NonCPS
+def getSerialCompileCommand() {
+    return "gradle --refresh-dependencies --stacktrace -Puser=jenkins -Ppw=jenkins --no-daemon -x test " +
+            ":cip-web-service-app:build " +
+            ":e-sim-app:build " +
+            ":external-provision-app:build " +
+            ":provision-app:build " +
+            ":realytics-app:build " +
+            ":rest-app:build " +
+            ":tef-csp-emulator:build " +
+            ":web-service-app:build"
+}
+
+def getChangeSet() {
+    //get the change list
+    def changeSet =  sh(
+            script: "git diff --name-status origin/${env.CHANGE_TARGET}...origin/${env.GIT_BRANCH}",
+            returnStdout: true
+    ).split('\n')
+
+    return changeSet
+}
+
+def getLatestDbFolder() {
+    def foldersList = []
+    def output = sh returnStdout: true, script: "ls -lt dba/patch/jasper_10.0 | grep ^d | awk '{print \$9}'"
+    foldersList = output.tokenize('\n').collect() { it }
+    foldersList = foldersList.sort().reverse()
+
+    echo "foldersList " + foldersList
+    return foldersList[0]
+}
+
+
+/**
+ We no longer have the addPLSQL script to copy the files, so adding checks to ensure that the files are
+ correctly checked in
+ **/
+def checkPRChangelogForSql() {
+    def changeSet = getChangeSet()
+    //TODO - check if this api lists directories in latest Pipeline Utility plugin. Currently it only works for files
+    //def fileList = findFiles(glob: 'dba/patch/jasper_8.0/*')
+
+    def version = getLatestDbFolder()
+    for(changedFileStatus in changeSet) {
+        def changedFile = getFile(changedFileStatus)
+        if(changedFile != null && changedFile.toString().contains("dba") && changedFile.toString().contains(".sql")) {
+            //File path checks
+            if(!changedFile.toString().contains("/plsql") && changedFile.toString() != changedFile.toString().toLowerCase()) {
+                error "SQL path has uppercase characters. " + changedFile + ". Please use lowercase for SQL files/folders"
+            }
+
+            //DDL checks
+            if(!changedFile.toString().contains("/plsql")){
+                //looks like we don't have DDL/DML naming conventions for plsql
+                def filePath = "${workspace}/" + changedFile.toString()
+                def fileContent = readFile(filePath)
+                if(fileContainsDDL(fileContent) && changedFile.toString().contains("-dml")){
+                    error "SQL file ${changedFile} contains DDL statements, but named as DML."
+                }else if(!fileContainsDDL(fileContent) && changedFile.toString().contains("-ddl")){
+                    error "SQL file ${changedFile} doesn't contain DDL statements, but named as DDL."
+                }
+            }
+        }
+        if(changedFile.toString().contains("/plsql")) {
+            // first get the file that is changed
+            def input = changedFile.substring(changedFile.lastIndexOf("/plsql"))
+            def sqlFile = changedFile.substring(changedFile.lastIndexOf("/") + 1)
+            def defaultFile = "dba/patch" + input
+            def releaseFile = "dba/patch/jasper_10.0/" + version.toString()  + input
+            def defaultFullPath = "${workspace}/" + defaultFile
+            def releaseFullPath = "${workspace}/" + releaseFile
+            try {
+                //first read the file that was changed
+                def defaultFileBytes = readFile(defaultFullPath);
+                //now check if the file is copied into release folders
+                def  releaseFileBytes = readFile(releaseFullPath);
+                if(defaultFileBytes != releaseFileBytes) {
+                    error "File [" + sqlFile + "] is missing or not found in release or default plsql folders. You would need to commit file " +
+                            "[" + sqlFile + "] " + "to both [" + defaultFile + "] and [" + releaseFile + "] plsql locations. Please " +
+                            "copy plsql file [" + sqlFile + "] to [" + releaseFile + "] and ["  + defaultFile + "]."
+                }
+            } catch (Exception ex) {
+                error "File [" + sqlFile + "] is missing or not found in release or default plsql folders. You would need to commit file " +
+                        "[" + sqlFile + "] " + "to both [" + defaultFile + "] and [" + releaseFile + "] plsql locations. Please " +
+                        "copy plsql file [" + sqlFile + "] to [" + releaseFile + "] and ["  + defaultFile + "]."
+            }
+        }
+    }
+}
+
+
+def boolean fileContainsDDL(fileContent) {
+    String[] lines = fileContent.toLowerCase().split('\n')
+    for (String line : lines) {
+        line = line.trim()
+        if (!line.startsWith('--') && line =~ /^(create|alter|revoke|drop|truncate|grant) /) {
+            return true
+        }
+    }
+    return false
+}
+
+def validateJIRAFormatInPRTitle() {
+    def title = "${env.CHANGE_TITLE}"
+    if (!(title =~ /[A-Z][A-Z_0-9]+-[0-9]+/)) {
+        error "Please use a valid JIRA format for PR title. JIRA ID's are case sensitive. Please fix your PR title by using the correct JIRA ID and re-run the builds"
+    }
+}
+
+
+def getFile(changedFileStatus) {
+    def splitFiles = changedFileStatus.split("\t")
+    def fileStatus = splitFiles[0].substring(0,1)
+    def changedFile = splitFiles[1]
+    if(fileStatus == 'R') {
+        changedFile = splitFiles[2]
+    }
+    if(fileStatus != 'D') {
+        return changedFile
+    }
+    return null
+}
+
+//block check-ins for all binary types
+def blockBinaryFiles() {
+    def changeSet = getChangeSet()
+    for(changedFileStatus in changeSet) {
+        def changedFile = getFile(changedFileStatus)
+        if(changedFile != null && changedFile =~ /\.war|\.tar|\.gz|\.zip|\.jar/) {
+            if(changedFile != 'gradle/wrapper/gradle-wrapper.jar') {
+                error "File [" + changedFile + "] is identified as a binary file. Binary files are not allowed to check-in. Please remove the file and try again"
+            }
+        }
+    }
+}
+
+def blockPropertyFilesWithPasswords() {
+    def algorithms = ["AES2", "AES", "3DES"];
+    def scanFolder = './deploy' ;
+    for ( algo in algorithms ) {
+        def changes = getOnlyChangedContents(algo, scanFolder);
+        if(changes != null && changes.indexOf("{${algo}}") != -1) {
+            error "Check-in contains ${algo} encrypted string ${changes}."
+        }
+    }
+}
+
+def getOnlyChangedContents(algo, dir) {
+  try {
+      def cmd = "git diff --color -G\\\\{${algo}\\\\} origin/${env.CHANGE_TARGET}...origin/${env.GIT_BRANCH} ${dir} | grep -e \'\\[32m\' || echo 'secrets not found'" ;
+      def changedContents =  sh(
+                script: cmd ,
+                returnStdout: true
+      );
+      return changedContents ;
+  } catch( Exception e) {
+      echo "Ignoring PropertyFilesWithPasswords check" + e.getMessage();
+  }
+}
+
+def validStage() {
+    script {
+        restartedFromStage = currentBuild.getBuildCauses().any { cause ->
+            cause._class == 'org.jenkinsci.plugins.pipeline.modeldefinition.causes.RestartDeclarativePipelineCause'
+        }
+        if (restartedFromStage) {
+            error 'Restarting build from a stage is disabled. Please re-run the build'
+        }
+    }
+    return true
+}
