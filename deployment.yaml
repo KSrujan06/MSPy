@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    component: {{ .Values.component }}
+    chartName: {{ .Chart.Name }}
+    chartVersion: {{ .Chart.Version }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    systemStatus: ignore
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      component: {{ .Values.component }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: "/jaspermetrics?passcode={{ .Values.global.prometheus.passcode }}"
+        prometheus.io/port: "{{ .Values.service.port }}"
+        prometheus.io/scrape: "true"
+      labels:
+        component: {{ .Values.component }}
+        release: {{ .Release.Name }}
+    spec:
+{{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.global.imagePullSecrets | indent 8 }}
+        {{- end }}
+      securityContext:
+        {{- toYaml .Values.global.securityContext | nindent 8 }}
+      dnsPolicy: {{ .Values.global.dns.dnsPolicy }}
+      dnsConfig:
+        #  - {{ .Release.Namespace }}.svc.cluster.local
+        {{- with .Values.global.dns.searches }}
+        searches:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.global.dns.nameservers }}
+        nameservers:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      containers:
+        - name: devices-nosql-consumer
+          image: "{{ .Values.global.registry }}{{ .Values.images.devices_nosql_consumer }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: jmx
+              containerPort: {{ .Values.service.jmx }}
+              protocol: TCP
+          command: ["/conf/startup.sh"]
+          args: ["--spring.cloud.discovery.enabled=false"]
+          env:
+            - name: PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secrets
+                  key: passphrase
+            - name: EXT_HTTP_PORT
+              value: "{{ .Values.service.port }}"
+            - name: EXT_HOST_NAME
+              value: 
+            - name: EXT_IP
+              value: 
+            - name: JMX_PORT
+              value: "{{ .Values.service.jmx }}"
+            - name: PROFILE_ENV
+              value: "{{ .Values.global.env }}"
+            - name: IMAGETAG
+              value: "{{ .Chart.AppVersion }}"
+            - name: XMS
+              value: "{{ .Values.XMS }}"
+            - name: XMX
+              value: "{{ .Values.XMX }}"
+            - name: SPRING_BOOT
+              value: "{{ .Values.SPRING_BOOT }}"
+            - name: SPRING_CLOUD_CONFIG
+              value: "{{ .Values.SPRING_CLOUD_CONFIG }}"
+            - name: LOGGING_MODE
+              value: "{{ .Values.LOGGING_MODE }}"
+          startupProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 20
+            successThreshold: 1
+          # https://spring.io/blog/2020/03/25/liveness-and-readiness-probes-with-spring-boot
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 1
+            failureThreshold: 10
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 10
+            successThreshold: 1
+          volumeMounts:
+            - name: config
+              mountPath: /ext-conf
+              readOnly: true
+            - name: jmxremote-secrets
+              mountPath: /ext-conf-mounted/jmxremote.access
+              subPath: jmxremote.access
+              readOnly: true
+            - name: jmxremote-secrets
+              mountPath: /ext-conf-mounted/jmxremote.password
+              subPath: jmxremote.password
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: common-configmap-ms
+        - name: jmxremote-secrets
+          secret:
+            secretName: {{ .Release.Name }}-{{ .Chart.Name }}-secrets
+            defaultMode: 0400
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
