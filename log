@@ -1,0 +1,74 @@
+2023-07-17 16:39:40,996 [23.06.79707-000] 1 [task-exec-9] INFO  io.harness.filesystem.FileIo - Deleting directory at path: /opt/harness-delegate/repository/k8s/9861d38a-176a-353b-bb1c-d0aeb2a64b80 [accountId=ZC50etDRTy-yDzSfX6KsTQ, taskId=VXsec4bKS76VrJsnQg6vcg-DEL]
+2023-07-17 16:39:40,998 [23.06.79707-000] 1 [task-exec-9] ERROR io.harness.delegate.exceptionhandler.core.DelegateExceptionManager - Response message: Please delete the conflicting resource from the cluster and try again.
+                  An update was attempted to some immutable field(s).
+                  Command executed: [kubectl --kubeconfig=config apply --filename=manifests.yaml]
+Exit Code: [1]
+Output: [secret/release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a-devices-nosql-consumer-secrets-3 configured
+configmap/common-configmap-ms-3 unchanged
+service/release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a unchanged
+]
+kubectl binary path: [kubectl]
+                  Apply manifest failed with error:
+The Deployment "release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a" is invalid: spec.selector: Invalid value: v1.LabelSelector{MatchLabels:map[string]string{"component":"devices-nosql-consumer", "harness.io/track":"stable", "release":"release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a"}, MatchExpressions:[]v1.LabelSelectorRequirement(nil)}: field is immutable
+Exception occurred: DATA [accountId=ZC50etDRTy-yDzSfX6KsTQ, taskId=VXsec4bKS76VrJsnQg6vcg-DEL]
+io.harness.delegate.exception.TaskNGDataException: DATA
+        at io.harness.delegate.task.k8s.K8sTaskNG.run(K8sTaskNG.java:148)
+        at io.harness.delegate.task.k8s.K8sTaskNG.run(K8sTaskNG.java:51)
+        at io.harness.delegate.task.common.AbstractDelegateRunnableTask.runDelegateTask(AbstractDelegateRunnableTask.java:126)
+        at io.harness.delegate.task.common.AbstractDelegateRunnableTask.run(AbstractDelegateRunnableTask.java:95)
+        at io.prometheus.client.Gauge$Child.setToTime(Gauge.java:207)
+        at io.harness.metrics.HarnessMetricRegistry.recordGaugeDuration(HarnessMetricRegistry.java:193)
+        at io.harness.delegate.service.DelegateAgentServiceImpl.executeTask(DelegateAgentServiceImpl.java:2188)
+        at io.harness.delegate.service.DelegateAgentServiceImpl.dispatchDelegateTask(DelegateAgentServiceImpl.java:2088)
+        at io.harness.delegate.service.DelegateAgentServiceImpl.lambda$dispatchDelegateTaskAsync$29(DelegateAgentServiceImpl.java:2004)
+        at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Unknown Source)
+        at java.base/java.util.concurrent.FutureTask.run(Unknown Source)
+        at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(Unknown Source)
+        at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(Unknown Source)
+        at java.base/java.lang.Thread.run(Unknown Source)
+Caused by: io.harness.exception.HintException: Please delete the conflicting resource from the cluster and try again.
+        at io.harness.exception.NestedExceptionUtils.hintWithExplanationAndCommandException(NestedExceptionUtils.java:22)
+        at io.harness.delegate.task.k8s.exception.KubernetesCliRuntimeExceptionHandler.getExplanationExceptionWithCommand(KubernetesCliRuntimeExceptionHandler.java:288)
+        at io.harness.delegate.task.k8s.exception.KubernetesCliRuntimeExceptionHandler.handleApplyManifestException(KubernetesCliRuntimeExceptionHandler.java:119)
+        at io.harness.delegate.task.k8s.exception.KubernetesCliRuntimeExceptionHandler.handleException(KubernetesCliRuntimeExceptionHandler.java:90)
+        at io.harness.exception.exceptionmanager.ExceptionManager.handleException(ExceptionManager.java:100)
+        at io.harness.exception.exceptionmanager.ExceptionManager.handleException(ExceptionManager.java:95)
+        at io.harness.exception.exceptionmanager.ExceptionManager.processException(ExceptionManager.java:49)
+        at io.harness.delegate.exceptionhandler.core.DelegateExceptionManager.getResponseData(DelegateExceptionManager.java:39)
+        at io.harness.delegate.task.common.AbstractDelegateRunnableTask.runDelegateTask(AbstractDelegateRunnableTask.java:161)
+        ... 11 common frames omitted
+Caused by: io.harness.exception.ExplanationException: An update was attempted to some immutable field(s).
+        ... 20 common frames omitted
+Caused by: io.harness.exception.ExplanationException: Command executed: [kubectl --kubeconfig=config apply --filename=manifests.yaml]
+Exit Code: [1]
+Output: [secret/release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a-devices-nosql-consumer-secrets-3 configured
+configmap/common-configmap-ms-3 unchanged
+service/release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a unchanged
+]
+kubectl binary path: [kubectl]
+        ... 20 common frames omitted
+Caused by: io.harness.exception.KubernetesTaskException: Apply manifest failed with error:
+The Deployment "release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a" is invalid: spec.selector: Invalid value: v1.LabelSelector{MatchLabels:map[string]string{"component":"devices-nosql-consumer", "harness.io/track":"stable", "release":"release-2d6ac829bbb465e0a5dd5e4ac887b2d4ffa3cc6a"}, MatchExpressions:[]v1.LabelSelectorRequirement(nil)}: field is immutable
+        at io.harness.delegate.task.k8s.K8sTaskHelperBase.applyManifests(K8sTaskHelperBase.java:920)
+        at io.harness.delegate.k8s.K8sRollingRequestHandler.executeTaskInternal(K8sRollingRequestHandler.java:165)
+        at io.harness.delegate.k8s.K8sRequestHandler.executeTask(K8sRequestHandler.java:47)
+        at io.harness.delegate.task.k8s.K8sTaskNG.run(K8sTaskNG.java:129)
+        at io.harness.delegate.task.k8s.K8sTaskNG.run(K8sTaskNG.java:51)
+        at io.harness.delegate.task.common.AbstractDelegateRunnableTask.runDelegateTask(AbstractDelegateRunnableTask.java:126)
+        ... 11 common frames omitted
+2023-07-17 16:39:41,034 [23.06.79707-000] 1 [task-exec-9] ERROR io.harness.delegate.task.common.AbstractDelegateRunnableTask - Unexpected error executing delegate taskId: [VXsec4bKS76VrJsnQg6vcg-DEL] in accountId: [ZC50etDRTy-yDzSfX6KsTQ] [taskId=VXsec4bKS76VrJsnQg6vcg-DEL]
+java.lang.ClassCastException: class io.prometheus.client.Counter cannot be cast to class io.prometheus.client.Gauge (io.prometheus.client.Counter and io.prometheus.client.Gauge are in unnamed module of loader org.springframework.boot.loader.LaunchedURLClassLoader @57e1b0c)
+        at io.harness.metrics.HarnessMetricRegistry.recordGaugeInc(HarnessMetricRegistry.java:157)
+        at io.harness.delegate.task.common.AbstractDelegateRunnableTask.runDelegateTask(AbstractDelegateRunnableTask.java:164)
+        at io.harness.delegate.task.common.AbstractDelegateRunnableTask.run(AbstractDelegateRunnableTask.java:95)
+        at io.prometheus.client.Gauge$Child.setToTime(Gauge.java:207)
+        at io.harness.metrics.HarnessMetricRegistry.recordGaugeDuration(HarnessMetricRegistry.java:193)
+        at io.harness.delegate.service.DelegateAgentServiceImpl.executeTask(DelegateAgentServiceImpl.java:2188)
+        at io.harness.delegate.service.DelegateAgentServiceImpl.dispatchDelegateTask(DelegateAgentServiceImpl.java:2088)
+        at io.harness.delegate.service.DelegateAgentServiceImpl.lambda$dispatchDelegateTaskAsync$29(DelegateAgentServiceImpl.java:2004)
+        at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Unknown Source)
+        at java.base/java.util.concurrent.FutureTask.run(Unknown Source)
+        at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(Unknown Source)
+        at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(Unknown Source)
+        at java.base/java.lang.Thread.run(Unknown Source)
+2
