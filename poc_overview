@@ -1,0 +1,103 @@
+Harness POC Overview
+Why do a POC with Harness.io?
+Purpose of POC
+About Harness.io
+What is Harness.io?
+Key Features
+Objectives of Harness.io POC
+Understanding Harness.io real-world scenarios
+Integration Compatibility
+Measure Efficiency and Effectiveness
+Scope of Harness POC
+Automated Deployments
+Rollbacks
+Performance Analysis
+Continuous Verification
+Pipeline Visualization
+POC Environment and Parameters
+Harness POC Execution Plan
+Steps for POC Execution
+Success Criteria
+Timelines
+Task Tracking
+CI/CD Harness POC
+
+
+To improve experience and stabilize deployment issues - Investigate use of Harness for Continuous Deployment as an alternative to Jenkins
+
+Harness POC Overview
+Why do a POC with Harness.io?
+As our organization continues to innovate and expand, we recognize the need for more robust and scalable continuous delivery solutions. Harness.io, with its unique features like automated canary deployments, rollback capabilities, performance analysis, and continuous verification, presents a compelling case.
+
+Purpose of POC
+This Proof of Concept (POC) is designed to validate the potential benefits of Harness.io within our specific environment and use-cases. Through the POC, we aim to:
+
+Evaluate Harness.io's functionality and compatibility with our existing systems.
+Understand how Harness.io could improve our deployment speed and safety.
+Test Harness.io's scalability and resilience under different deployment scenarios.
+About Harness.io
+What is Harness.io?
+Harness.io is a cutting-edge software delivery platform, designed to facilitate seamless deployments, reduce operational complexity, and enable businesses to deliver software at the speed of ideas.
+
+Key Features
+Automation: Harness.io streamlines the software delivery process by automating build, test, and deployment pipelines. It integrates seamlessly with existing CI/CD tools to create a unified, automated workflow.
+Advanced Deployment Strategies: Harness.io supports a variety of advanced deployment strategies, such as Canary, Blue-Green, and Rolling updates, enabling safer and more controlled deployments.
+Security: Harness.io is built with security in mind, providing end-to-end encryption, fine-grained access controls, and audit trails to ensure secure deployment processes.
+Transparency: With Harness.io, gain full visibility into your deployment pipelines. Its detailed logging and reporting tools provide real-time insights into every stage of the deployment process.
+Insights: Harness.io uses AI and machine learning to provide actionable insights and analytics, enabling teams to continuously improve their deployment processes.
+Objectives of Harness.io POC
+Understanding Harness.io real-world scenarios
+Our primary objective is to understand how Harness.io performs in a realistic production-like environment. By mimicking our existing workflows and deployment strategies, we aim to assess how Harness.io’s features like automated deployments, rollback mechanisms, and advanced deployment strategies can enhance our operational efficiency.
+
+Integration Compatibility
+Harness.io promises compatibility with a plethora of existing systems and tools. We aim to test these integrations to ensure a seamless transition. We'll analyze how effectively Harness.io interfaces with our current CI/CD pipeline, version control systems, monitoring tools, and notification channels.
+
+Measure Efficiency and Effectiveness
+Measure the potential efficiency gains and improvements in effectiveness brought about by Harness.io. By comparing key metrics such as deployment time, failure rate, and the time spent on manual intervention, we intend to quantify the benefits of implementing Harness.io in our production environment.
+
+Scope of Harness POC
+Automated Deployments
+To minimize the impact of potential issues during deployment, we will explore the automated canary deployments feature of Harness.io. This will allow us to gradually roll out changes to a small subset of users before a full-scale deployment.
+
+Template Application deployment: Basic familiarity with deploying K8 app in Harness
+Docker Application deployment: Understand Harness deploying docker CC application
+Deploying CC K8 App: Migrate existing CC docker app to K8 using Harness​​
+Rollbacks
+Harness.io's automatic rollback feature is crucial to ensuring service stability. During the POC, we will simulate deployment failures to test the efficacy and responsiveness of Harness.io's rollback mechanisms.
+
+Performance Analysis
+Harness.io offers AI-driven performance analysis. We will assess this feature by comparing performance metrics before and after deployments.
+
+Continuous Verification
+We will test Harness.io's ability to integrate with our existing monitoring tools to provide real-time feedback on deployments and post-deployment health checks.
+
+Pipeline Visualization
+To improve the visibility of our deployment process, we will evaluate the pipeline visualization capabilities of Harness.io, focusing on its clarity, user-friendliness, and effectiveness.
+
+POC Environment and Parameters
+For the POC, we will use a subset of our production environment, replicating real-world conditions without impacting our live services. Key parameters we will consider include:
+Deployment Frequency: The frequency of deployments will be accelerated to generate sufficient data for evaluation.
+Number of Services: We will choose a representative sample of our services for this POC to ensure a comprehensive test of Harness.io's features.
+User Traffic Simulation: To adequately test canary deployments and rollback functionality, we will simulate various levels of user traffic and different scenarios.
+Monitoring Integration: We will integrate Harness.io with our existing monitoring tools to test its compatibility and the effectiveness of continuous verification.
+
+Harness POC Execution Plan
+Steps for POC Execution
+Setup and Configuration: We'll start by setting up Harness.io and integrating it with our existing CI/CD tools and infrastructure.
+Feature Testing: Next, we'll create a series of real-world scenarios to test Harness.io’s key features, such as automated canary deployments, rollback capabilities, and observability tools.
+Workflow Creation: We will create and run several deployment workflows using Harness.io to test its ease of use, flexibility, and automation capabilities.
+Performance Monitoring: Throughout the POC, we'll monitor and document the performance of Harness.io, paying close attention to any improvements in deployment speed, failure rates, etc.
+
+Success Criteria
+Efficiency: At least 30% reduction in the time taken for deployments.
+Reliability: A decrease in the number of deployment failures by 50%.
+Ease of Use: The team should find Harness.io intuitive and easy to use, with a short learning curve.
+Integration: Seamless integration with our existing CI/CD tools and infrastructure.
+Visibility: Improved visibility into the deployment process and system health.
+
+Timelines
+Setup and Configuration: 1 week
+Feature Testing and Workflow Creation: 2 weeks
+Evaluation and Reporting: 1 week
+
+Task Tracking
