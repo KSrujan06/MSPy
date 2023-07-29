@@ -1,3 +1,8 @@
+https://cisco.webex.com/webappng/sites/cisco/recording/125c8f729124103bb4fe005056819183/playback
+BysgY38Y
+
+
+
 2023-07-17 16:39:40,996 [23.06.79707-000] 1 [task-exec-9] INFO  io.harness.filesystem.FileIo - Deleting directory at path: /opt/harness-delegate/repository/k8s/9861d38a-176a-353b-bb1c-d0aeb2a64b80 [accountId=ZC50etDRTy-yDzSfX6KsTQ, taskId=VXsec4bKS76VrJsnQg6vcg-DEL]
 2023-07-17 16:39:40,998 [23.06.79707-000] 1 [task-exec-9] ERROR io.harness.delegate.exceptionhandler.core.DelegateExceptionManager - Response message: Please delete the conflicting resource from the cluster and try again.
                   An update was attempted to some immutable field(s).
