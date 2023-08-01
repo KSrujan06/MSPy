@@ -1,0 +1,73 @@
+images:
+  name: /jasper-sw/devices-nosql-consumer/k8/devices_nosql_consumer:0.0.1-e47d831
+global:
+  imagePullSecrets:
+    - name: regcred
+  registry: dockerhub.cisco.com/smi-fuse-docker-internal
+  imagePullPolicy: IfNotPresent
+  image:
+    registry: dockerhub.cisco.com/smi-fuse-docker-internal
+  securityContext:
+    runAsUser: 0
+    fsGroup: 0
+  passphrase: JasperQATestingEnvironment
+  jmx:
+    jmxMonitor:
+      password: -Crumper-
+    jmxAdmin:
+      password: jmx!Admin
+  dns:
+    dnsPolicy: ClusterFirst
+  prometheus:
+    passcode: prometheus
+  env: local
+
+
+SPRING_BOOT: 
+SPRING_CLOUD_CONFIG:
+LOGGING_MODE: local
+replicaCount: 3
+
+XMS: 1g
+XMX: 2g
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: 500m
+    memory: 2Gi
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAnnotations: {
+  service.beta.kubernetes.io/openstack-internal-load-balancer: "true"
+}
+
+service:
+  #https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types
+  #ClusterIP for back-end and LoadBalancer for front-end services
+  type: ClusterIP
+  port: 8081
+  jmx: 9001
+
+autoscaling:
+  enabled: false
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+component: devices-nosql-consumer
+
+nginx:
+  replicaCount: 1
+  image:
+    repository: nginx
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
