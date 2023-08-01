@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: {{ .Values.nginx.replicaCount }}
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      securityContext:
+        {{- toYaml .Values.global.securityContext | nindent 8 }}
+      containers:
+      - name: nginx
+        image: {{ .Values.nginx.image.repository }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html-volume
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: html-volume
+        configMap:
+          name: welcome-message
+          items:
+          - key: index.html
+            path: index.html
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+      {{ toYaml .Values.global.imagePullSecrets | indent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.global.securityContext | nindent 8 }}
+      dnsPolicy: {{ .Values.global.dns.dnsPolicy }}
+      dnsConfig:
+        {{- with .Values.global.dns.searches }}
+        searches:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.global.dns.nameservers }}
+        nameservers:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
